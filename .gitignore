@@ -1,0 +1,6 @@
+*.pt
+__pycache__/
+data_*/
+image/
+runs/
+*.zip
