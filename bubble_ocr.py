@@ -13,6 +13,7 @@ from ultralytics import YOLO
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from chat_record_manager import chat_record_manager
 
 
 # ============= 配置参数 =============
@@ -42,6 +43,10 @@ CONFIG = {
     'save_annotated': True,         # 是否保存标注图片
     'save_preprocessed': False,     # 是否保存预处理后的图片（用于调试）
     'output_dir': 'runs/ocr',       # 输出目录
+    
+    # 聊天记录保存配置
+    'save_chat_records': True,      # 是否保存聊天记录（支持智能合并）
+    'session_id': None,             # 会话ID（None则从图片名称自动生成）
 }
 
 
@@ -884,15 +889,16 @@ def save_results(image_path: str, detections: List[Dict],
 
 # ============= 6. 主流程模块 =============
 
-def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -> Dict:
+def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict, session_id: Optional[str] = None) -> Dict:
     """
-    处理单张图片：检测气泡 + OCR识别
+    处理单张图片：检测气泡 + OCR识别 + 聊天记录保存和合并
     
     Args:
         image_path: 图片路径
         yolo_model: YOLO模型
         ocr_engine: OCR引擎
         config: 配置参数
+        session_id: 会话ID（用于聊天记录合并，None则从图片名称自动生成）
         
     Returns:
         处理结果
@@ -998,6 +1004,56 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
         print("(无有效消息)")
     print(f"{'='*60}")
     
+    # 4.6 保存和合并聊天记录（如果启用）
+    merge_info = None
+    if config.get('save_chat_records', True) and chat_messages:
+        step_start = time.time()
+        
+        # 生成或使用session_id
+        if session_id is None:
+            session_id = config.get('session_id')
+            if session_id is None:
+                # 从图片路径生成session_id（去除扩展名）
+                session_id = Path(image_path).stem
+        
+        # 转换为标准格式: [{"speaker": "...", "content": "..."}, ...]
+        # chat_messages 中的 side 字段需要转换为标准格式
+        standard_records = []
+        for msg in chat_messages:
+            # 转换 side: 'user' -> 'User', 'otherparty' -> 'OtherParty'
+            speaker = msg.get('side', '')
+            if speaker == 'user':
+                speaker = 'User'
+            elif speaker == 'otherparty':
+                speaker = 'OtherParty'
+            
+            standard_records.append({
+                "speaker": speaker,
+                "content": msg.get('text', '').strip()
+            })
+        
+        # 智能合并并保存
+        added_count, total_count, operation_type = chat_record_manager.merge_and_save(
+            session_id, standard_records
+        )
+        
+        merge_info = {
+            'session_id': session_id,
+            'added_count': added_count,
+            'total_count': total_count,
+            'operation_type': operation_type
+        }
+        
+        timing['chat_merge'] = time.time() - step_start
+        
+        print(f"\n💾 聊天记录保存:")
+        print(f"   会话ID: {session_id}")
+        print(f"   本次新增: {added_count} 条消息")
+        print(f"   累计总数: {total_count} 条消息")
+        print(f"   操作类型: {operation_type}")
+        if 'chat_merge' in timing:
+            print(f"   合并耗时: {timing['chat_merge']*1000:.2f} ms")
+    
     # 5. 保存结果
     step_start = time.time()
     print(f"\n保存结果...")
@@ -1020,6 +1076,8 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
     print(f"   裁剪:        {timing['cropping']*1000:>7.2f} ms")
     print(f"   OCR识别:     {timing['ocr_recognition']*1000:>7.2f} ms  ⭐")
     print(f"   保存结果:    {timing['saving']*1000:>7.2f} ms")
+    if 'chat_merge' in timing:
+        print(f"   聊天合并:    {timing['chat_merge']*1000:>7.2f} ms")
     print(f"   {'─'*40}")
     print(f"   总耗时:      {timing['total']*1000:>7.2f} ms")
     
@@ -1029,7 +1087,9 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
     return {
         'detections': detections,
         'ocr_results': ocr_results,
-        'saved_files': saved_files
+        'saved_files': saved_files,
+        'chat_messages': chat_messages,
+        'merge_info': merge_info
     }
 
 
@@ -1063,6 +1123,9 @@ def main():
     
     # 3. 处理图片
     # 可以是单张图片或目录
+    # 使用相同的 session_id 可以实现多张图片的聊天记录合并
+    session_id = CONFIG.get('session_id', 'default_session')  # 默认会话ID
+    
     test_images = [
         # "/workspace/yolo/image/bumble.jpg",
         # "/workspace/yolo/image/tinder.jpg"
@@ -1071,9 +1134,11 @@ def main():
     ]
     
     results = []
-    for image_path in test_images:
+    for i, image_path in enumerate(test_images):
         if Path(image_path).exists():
-            result = process_image(image_path, yolo_model, ocr_engine, CONFIG)
+            # 可以使用相同的session_id来合并多张图片的记录
+            # 或者为每张图片使用不同的session_id
+            result = process_image(image_path, yolo_model, ocr_engine, CONFIG, session_id=session_id)
             results.append(result)
         else:
             print(f"\n⚠️  图片不存在: {image_path}")
@@ -1085,4 +1150,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
