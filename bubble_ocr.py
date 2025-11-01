@@ -18,26 +18,30 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ============= 配置参数 =============
 CONFIG = {
     # YOLO模型配置
-    # 'yolo_model': 'runs/train/yolo11n_bubble/weights/best.pt',  # YOLO模型路径
-    'yolo_model': 'runs/train/bubble_detection/weights/best.pt',  # YOLO8s模型路径
+    'yolo_model': 'runs/train/yolo11s_bubble/weights/best.pt',  # YOLO模型路径
+    # 'yolo_model': 'runs/train/bubble_detection/weights/best.pt',  # YOLO8s模型路径
 
-    'yolo_conf': 0.25,        # YOLO置信度阈值
-    'yolo_iou': 0.45,         # YOLO NMS IOU阈值
+    # yolo_conf 设置为 0.4~0.6，建议 0.5（检测框较准确且不过多），如遇过多误检可适当提高
+    # yolo_iou 0.4~0.6，0.45 通常表现最佳
+    'yolo_conf': 0.5,        # YOLO置信度阈值（建议 0.5；范围 0.4~0.6，低会检测多，高会漏检）
+    'yolo_iou': 0.45,        # YOLO NMS IOU阈值（建议 0.45，0.4~0.6均可，根据重叠情况微调）
     
     # OCR配置
-    'ocr_backend': 'tesseract',  # 'tesseract', 'paddleocr' 或 'easyocr'
-    'ocr_lang': 'chi_sim+eng',   # Tesseract语言：'chi_sim+eng'=中英文, 'eng'=英文
-    'use_multithread': True,     # 是否使用多线程（仅Tesseract）
-    'num_workers': 12,           # 线程数（96核服务器优化为12）
+    'ocr_backend': 'tesseract',     # 'tesseract', 'paddleocr' 或 'easyocr'
+    'ocr_lang': 'chi_sim+eng',      # Tesseract语言：'chi_sim+eng'=中英文, 'eng'=英文
+    'ocr_preprocess': False,        # 是否对Tesseract使用预处理（高质量截图建议关闭）
+    'use_multithread': True,        # 是否使用多线程（仅Tesseract）
+    'num_workers': 12,              # 线程数（96核服务器优化为12）
     
     # 图像处理
-    'padding': 5,                # 裁剪框的边距
-    'min_text_confidence': 0.5,  # OCR最小置信度
+    'padding': 5,                   # 裁剪框的边距
+    'min_text_confidence': 0.5,     # OCR最小置信度
     
     # 输出配置
-    'save_crops': True,          # 是否保存裁剪的气泡图片
-    'save_annotated': True,      # 是否保存标注图片
-    'output_dir': 'runs/ocr',    # 输出目录
+    'save_crops': True,             # 是否保存裁剪的气泡图片
+    'save_annotated': True,         # 是否保存标注图片
+    'save_preprocessed': False,     # 是否保存预处理后的图片（用于调试）
+    'output_dir': 'runs/ocr',       # 输出目录
 }
 
 
@@ -175,9 +179,81 @@ def preprocess_for_ocr(image: np.ndarray) -> np.ndarray:
     return processed
 
 
+def preprocess_for_tesseract(image: np.ndarray) -> np.ndarray:
+    """
+    专门为 Tesseract OCR 优化的预处理
+    对于聊天气泡场景，保持简单的预处理效果最好
+    
+    Args:
+        image: 输入图片（BGR格式）
+        
+    Returns:
+        预处理后的图片
+    """
+    # 方法1: 保持原图（对于高质量截图效果最好）
+    # return image
+    
+    # 方法2: 轻微预处理（推荐）
+    # 转灰度
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    
+    # 添加白色边框（帮助 Tesseract 更好地检测文本边界）
+    bordered = cv2.copyMakeBorder(gray, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+    
+    # 轻微放大（对小文字有帮助）
+    h, w = bordered.shape
+    if h < 100 or w < 100:  # 如果图片太小，放大2倍
+        bordered = cv2.resize(bordered, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    
+    # 使用双边滤波去噪（保留边缘）
+    denoised = cv2.bilateralFilter(bordered, 5, 50, 50)
+    
+    # 轻微锐化
+    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+    sharpened = cv2.filter2D(denoised, -1, kernel)
+    
+    return sharpened
+
+
 # ============= 3. OCR 识别模块 =============
 
-def recognize_text_tesseract(ocr_config: Dict, image: np.ndarray, min_confidence: float = 0.5) -> Dict:
+def postprocess_text(text: str) -> str:
+    """
+    OCR 结果后处理，修复常见识别错误
+    
+    Args:
+        text: 原始识别文本
+        
+    Returns:
+        修复后的文本
+    """
+    if not text:
+        return text
+    
+    # 常见的 OCR 识别错误修正
+    replacements = {
+        # 修复单词开头的竖线（通常是字母 I）
+        r'\| ': 'I ',           # "| live" -> "I live"
+        r'\|\'': 'I\'',         # "|'m" -> "I'm"
+        
+        # 修复其他常见错误
+        r'\b0\b': 'O',          # 单独的 0 通常是字母 O
+        r'\bl\b': 'I',          # 在某些上下文中 l 应该是 I
+    }
+    
+    import re
+    processed = text
+    for pattern, replacement in replacements.items():
+        processed = re.sub(pattern, replacement, processed)
+    
+    return processed
+
+
+def recognize_text_tesseract(ocr_config: Dict, image: np.ndarray, min_confidence: float = 0.5, 
+                            preprocess: bool = True) -> Dict:
     """
     使用 Tesseract-OCR 识别文字
     
@@ -185,6 +261,7 @@ def recognize_text_tesseract(ocr_config: Dict, image: np.ndarray, min_confidence
         ocr_config: Tesseract配置字典
         image: 输入图片
         min_confidence: 最小置信度
+        preprocess: 是否使用专门的预处理
         
     Returns:
         识别结果字典：
@@ -199,8 +276,25 @@ def recognize_text_tesseract(ocr_config: Dict, image: np.ndarray, min_confidence
     
     # 获取详细的OCR数据
     try:
+        # 预处理图像
+        if preprocess:
+            processed_image = preprocess_for_tesseract(image)
+        else:
+            processed_image = image
+        
+        # PSM 模式说明:
+        # PSM 3: 全自动页面分割（默认）
+        # PSM 4: 假设有一列不同大小的文本
+        # PSM 6: 假设是单个统一的文本块
+        # PSM 7: 将图像视为单行文本
+        # PSM 11: 稀疏文本，按任意顺序查找尽可能多的文本
+        # PSM 12: 带 OSD 的稀疏文本
+        
+        # 对于聊天气泡，经测试 PSM 3（默认）效果最好，适合多行文本
+        custom_config = r'--oem 3 --psm 3'
+        
         # 使用 image_to_data 获取详细信息（包括置信度）
-        data = pytesseract.image_to_data(image, lang=lang, output_type=pytesseract.Output.DICT)
+        data = pytesseract.image_to_data(processed_image, lang=lang, config=custom_config, output_type=pytesseract.Output.DICT)
         
         # 提取文本和置信度
         lines = []
@@ -248,6 +342,12 @@ def recognize_text_tesseract(ocr_config: Dict, image: np.ndarray, min_confidence
         # 合并所有行
         full_text = '\n'.join([line['text'] for line in lines])
         avg_confidence = np.mean([line['confidence'] for line in lines]) if lines else 0.0
+        
+        # 后处理文本，修复常见错误
+        full_text = postprocess_text(full_text)
+        # 同时也处理每一行
+        for line in lines:
+            line['text'] = postprocess_text(line['text'])
         
         return {
             'text': full_text,
@@ -494,7 +594,7 @@ def recognize_text_batch(ocr_engine, images: List[np.ndarray], backend: str,
             
             def process_single(idx_img):
                 idx, img = idx_img
-                return idx, recognize_text_tesseract(ocr_engine, img, min_confidence)
+                return idx, recognize_text_tesseract(ocr_engine, img, min_confidence, preprocess)
             
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 # 提交所有任务
@@ -511,7 +611,7 @@ def recognize_text_batch(ocr_engine, images: List[np.ndarray], backend: str,
             # 单线程处理
             results = []
             for img in images:
-                result = recognize_text_tesseract(ocr_engine, img, min_confidence)
+                result = recognize_text_tesseract(ocr_engine, img, min_confidence, preprocess)
                 results.append(result)
             return results
     
@@ -602,6 +702,84 @@ def draw_results(image: np.ndarray, detections: List[Dict],
 
 # ============= 5. 结果保存模块 =============
 
+def classify_message_side(bbox: List[int], image_width: int) -> str:
+    """
+    根据bbox位置判断消息是左侧（对方）还是右侧（用户）
+    
+    Args:
+        bbox: 边界框 [x1, y1, x2, y2]
+        image_width: 图片宽度
+        
+    Returns:
+        'user' 或 'otherparty'
+    """
+    x1, y1, x2, y2 = bbox
+    
+    # 计算bbox的中心点
+    center_x = (x1 + x2) / 2
+    
+    # 方法1：简单的中心点判断（如果中心点在右半部分，则是user）
+    # if center_x > image_width / 2:
+    #     return 'user'
+    # else:
+    #     return 'otherparty'
+    
+    # 方法2：更精确的边界距离判断
+    # 计算左边界到左侧的距离 vs 右边界到右侧的距离
+    left_distance = x1  # 左边界到图片左侧的距离
+    right_distance = image_width - x2  # 右边界到图片右侧的距离
+    
+    # 如果右边界距离右侧更近，说明是用户消息（在右边）
+    if right_distance < left_distance:
+        return 'user'
+    else:
+        return 'otherparty'
+
+
+def format_chat_messages(detections: List[Dict], ocr_results: List[Dict], 
+                         image_width: int) -> Tuple[List[Dict], str]:
+    """
+    格式化聊天消息，返回带标签的消息列表和格式化文本
+    
+    Args:
+        detections: YOLO检测结果
+        ocr_results: OCR识别结果
+        image_width: 图片宽度
+        
+    Returns:
+        (消息列表, 格式化的聊天文本)
+    """
+    chat_messages = []
+    chat_lines = []
+    
+    for i, (detection, ocr_result) in enumerate(zip(detections, ocr_results)):
+        text = ocr_result['text'].strip()
+        
+        # 跳过未识别到文字的气泡
+        if not text:
+            continue
+        
+        # 判断消息归属
+        bbox = detection['bbox']
+        side = classify_message_side(bbox, image_width)
+        
+        # 添加到消息列表
+        message_info = {
+            'id': i + 1,
+            'side': side,
+            'text': text,
+            'bbox': bbox,
+            'confidence': ocr_result['confidence']
+        }
+        chat_messages.append(message_info)
+        
+        # 格式化为文本行
+        chat_lines.append(f"{side}: {text}")
+    
+    chat_text = '\n'.join(chat_lines)
+    return chat_messages, chat_text
+
+
 def save_results(image_path: str, detections: List[Dict], 
                 ocr_results: List[Dict], config: Dict) -> Dict:
     """
@@ -625,12 +803,14 @@ def save_results(image_path: str, detections: List[Dict],
     
     # 读取原图
     image = cv2.imread(image_path)
+    image_height, image_width = image.shape[:2]
     
     saved_files = {
         'result_dir': str(result_dir),
         'crops': [],
         'json': None,
-        'annotated': None
+        'annotated': None,
+        'chat': None
     }
     
     # 保存裁剪的气泡图片
@@ -645,6 +825,21 @@ def save_results(image_path: str, detections: List[Dict],
             crop_path = crops_dir / f'bubble_{i+1}.jpg'
             cv2.imwrite(str(crop_path), cropped)
             saved_files['crops'].append(str(crop_path))
+    
+    # 保存预处理后的图片（用于调试OCR）
+    if config.get('save_preprocessed', False) and config['ocr_backend'] == 'tesseract':
+        preprocessed_dir = result_dir / 'preprocessed'
+        preprocessed_dir.mkdir(exist_ok=True)
+        
+        for i, detection in enumerate(detections):
+            bbox = detection['bbox']
+            cropped = crop_bubble(image, bbox, config['padding'])
+            preprocessed = preprocess_for_tesseract(cropped)
+            
+            prep_path = preprocessed_dir / f'bubble_{i+1}_preprocessed.jpg'
+            cv2.imwrite(str(prep_path), preprocessed)
+        
+        print(f"  ✓ 已保存预处理图片到: {preprocessed_dir}")
     
     # 保存标注图片
     if config['save_annotated']:
@@ -676,6 +871,13 @@ def save_results(image_path: str, detections: List[Dict],
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(results_json, f, ensure_ascii=False, indent=2)
     saved_files['json'] = str(json_path)
+    
+    # 保存聊天记录
+    chat_messages, chat_text = format_chat_messages(detections, ocr_results, image_width)
+    chat_path = result_dir / 'chat.txt'
+    with open(chat_path, 'w', encoding='utf-8') as f:
+        f.write(chat_text)
+    saved_files['chat'] = str(chat_path)
     
     return saved_files
 
@@ -749,18 +951,25 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
     step_start = time.time()
     use_multithread = config.get('use_multithread', False)
     num_workers = config.get('num_workers', 4)
+    ocr_preprocess = config.get('ocr_preprocess', True)
     
     if use_multithread and config['ocr_backend'] == 'tesseract':
         print(f"\n批量 OCR 识别（多线程，{num_workers} 个线程）...")
     else:
         print(f"\n批量 OCR 识别（单线程）...")
     
+    if config['ocr_backend'] == 'tesseract':
+        if ocr_preprocess:
+            print(f"  ✓ 使用预处理 + PSM 3 模式")
+        else:
+            print(f"  ✓ 使用原图 + PSM 3 模式（推荐，效果最佳）")
+    
     ocr_results = recognize_text_batch(
         ocr_engine,
         cropped_images,
         backend=config['ocr_backend'],
         min_confidence=config['min_text_confidence'],
-        preprocess=True,
+        preprocess=ocr_preprocess,
         use_multithread=use_multithread,
         num_workers=num_workers
     )
@@ -770,10 +979,24 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
     print(f"\n识别结果:")
     for i, ocr_result in enumerate(ocr_results):
         if ocr_result['text']:
-            text_preview = ocr_result['text'].replace('\n', ' ')[:50]
-            print(f"  气泡 {i+1}/{len(ocr_results)}: '{text_preview}' (置信度: {ocr_result['confidence']:.2f})")
+            # 显示完整文本，保留换行符（用空格替换以便单行显示）
+            full_text = ocr_result['text'].replace('\n', ' ')
+            print(f"  气泡 {i+1}/{len(ocr_results)}: '{full_text}' (置信度: {ocr_result['confidence']:.2f})")
         else:
             print(f"  气泡 {i+1}/{len(ocr_results)}: 未识别到文字")
+    
+    # 4.5 打印聊天记录（按左右分类）
+    image_width = image.shape[1]
+    chat_messages, chat_text = format_chat_messages(detections, ocr_results, image_width)
+    
+    print(f"\n{'='*60}")
+    print(f"💬 聊天记录 (共 {len(chat_messages)} 条有效消息):")
+    print(f"{'='*60}")
+    if chat_text:
+        print(chat_text)
+    else:
+        print("(无有效消息)")
+    print(f"{'='*60}")
     
     # 5. 保存结果
     step_start = time.time()
@@ -786,7 +1009,9 @@ def process_image(image_path: str, yolo_model: YOLO, ocr_engine, config: Dict) -
     print(f"\n✅ 处理完成!")
     print(f"   检测到气泡: {len(detections)} 个")
     print(f"   识别到文字: {sum(1 for r in ocr_results if r['text'])} 个")
+    print(f"   有效消息: {len(chat_messages)} 条")
     print(f"   结果保存至: {saved_files['result_dir']}")
+    print(f"   聊天记录: {saved_files['chat']}")
     
     # 打印耗时统计
     print(f"\n⏱️  耗时统计:")
@@ -839,8 +1064,9 @@ def main():
     # 3. 处理图片
     # 可以是单张图片或目录
     test_images = [
-        # '/workspace/yolo/data/val/images/14d5a4c9-3f03e5d7-bb2d-4dc7-ab76-696bcc96bacf.jpg',
-        '/workspace/yolo/bumble.jpg',
+        # "/workspace/yolo/image/bumble.jpg",
+        # "/workspace/yolo/image/tinder.jpg"
+        "/workspace/yolo/image/tinder2.jpg"
         # 添加更多测试图片
     ]
     

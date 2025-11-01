@@ -63,9 +63,10 @@ def main():
     """
     # 模型路径（按优先级尝试）
     model_paths = [
+        "/workspace/yolo/runs/train/bubble_optimized/weights/best.pt"
         # "runs/train/bubble_detection/weights/best.pt"
         # "runs/train/yolov8s_bubble/weights/best.pt",
-        'runs/train/yolo11n_bubble/weights/best.pt',  # YOLO11n训练的模型
+        # 'runs/train/yolo11n_bubble/weights/best.pt',  # YOLO11n训练的模型
         # "runs/train/yolo11s_bubble/weights/best.pt",
         # "runs/train/yolo11m_bubble/weights/best.pt",
     ]
