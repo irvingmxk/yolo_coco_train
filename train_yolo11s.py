@@ -7,6 +7,7 @@ YOLO11s 气泡检测微调脚本
 
 import os
 from pathlib import Path
+from datetime import datetime
 from ultralytics import YOLO
 import torch
 
@@ -60,7 +61,7 @@ CONFIG = {
     
     # 输出配置
     'project': 'runs/train',         # 项目目录
-    'name': 'yolo11s_bubble',        # 实验名称
+    'name': None,                    # 实验名称（将在运行时自动生成）
     'exist_ok': True,                # 覆盖已存在的实验
 }
 
@@ -93,7 +94,7 @@ def check_environment():
         print(f"   首次运行将自动下载预训练模型")
     
     # 检查数据集
-    data_dir = Path('/workspace/yolo/data_1029')
+    data_dir = Path('/workspace/yolo/data_1105')
     train_dir = data_dir / 'train' / 'images'
     val_dir = data_dir / 'val' / 'images'
     data_yaml = data_dir / 'data.yaml'
@@ -130,6 +131,13 @@ def train_model(config):
     print("开始训练 YOLO11s")
     print("=" * 60)
     
+    # 自动生成实验名称（如果未指定）
+    if config['name'] is None:
+        current_date = datetime.now().strftime('%y%m%d')
+        base_name = 'yolo11s_bubble'
+        config['name'] = f"{base_name}_{current_date}"
+        print(f"\n✅ 自动生成实验名称: {config['name']}")
+    
     # 打印配置
     print("\n训练配置:")
     print(f"  模型: {config['model']}")
@@ -141,13 +149,14 @@ def train_model(config):
     print(f"  初始学习率: {config['lr0']}")
     print(f"  余弦学习率: {config['cos_lr']}")
     print(f"  早停patience: {config['patience']}")
+    print(f"  实验名称: {config['name']}")
     
     # 加载模型
     print(f"\n正在加载模型: {config['model']}")
     model = YOLO(config['model'])
     
     # 数据配置文件路径
-    data_yaml = '/workspace/yolo/data_1029/data.yaml'
+    data_yaml = '/workspace/yolo/data_1105/data.yaml'
     
     print(f"\n开始训练...")
     print(f"数据配置: {data_yaml}")
@@ -274,7 +283,7 @@ def main():
     # 验证最佳模型
     if best_model_path.exists():
         print(f"\n📊 验证最佳模型...")
-        validate_model(str(best_model_path), '/workspace/yolo/data_1029/data.yaml')
+        validate_model(str(best_model_path), '/workspace/yolo/data_1105/data.yaml')
         
         print(f"\n" + "=" * 60)
         print("训练结果文件:")

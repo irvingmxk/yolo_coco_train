@@ -141,7 +141,7 @@ def check_environment():
         CONFIG['device'] = 'cpu'
     
     # 检查数据集
-    data_dir = Path('/workspace/yolo/data_1029')
+    data_dir = Path('/workspace/yolo/data_1105')
     train_dir = data_dir / 'train' / 'images'
     val_dir = data_dir / 'val' / 'images'
     
@@ -186,7 +186,7 @@ def train_model(config, model_name='YOLO11s'):
     model = YOLO(config['model'])
     
     # 数据配置
-    data_yaml = '/workspace/yolo/data_1029/data.yaml'
+    data_yaml = '/workspace/yolo/data_1105/data.yaml'
     
     print(f"\n🚀 开始训练...")
     print(f"   数据: {data_yaml}")
@@ -324,7 +324,7 @@ def main():
     best_model = Path(CONFIG['project']) / CONFIG['name'] / 'weights' / 'best.pt'
     if best_model.exists():
         print(f"\n📊 验证最佳模型...")
-        validate_model(str(best_model), '/workspace/yolo/data_1029/data.yaml')
+        validate_model(str(best_model), '/workspace/yolo/data_1105/data.yaml')
         
         print(f"\n" + "=" * 60)
         print("📁 训练结果:")

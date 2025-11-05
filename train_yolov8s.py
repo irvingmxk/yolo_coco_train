@@ -7,6 +7,7 @@ YOLO11s 气泡检测微调脚本
 
 import os
 from pathlib import Path
+from datetime import datetime
 from ultralytics import YOLO
 import torch
 
@@ -16,41 +17,42 @@ CONFIG = {
     'model': 'yolov8s.pt',          # YOLO8s 预训练模型
     
     # 训练参数
-    'epochs': 100,                   # 训练轮数
-    'batch': 16,                     # 批次大小（提升到16以获得更稳定训练）
+    'epochs': 200,                   # 训练轮数（小数据集需要更多轮数）
+    'batch': 8,                      # 批次大小（小数据集减小批次，提高稳定性）
     'imgsz': 640,                    # 输入图像大小
     'device': 0,                     # GPU设备（0,1,2... 或 'cpu'）
-    'workers': 8,                    # 数据加载线程数
+    'workers': 4,                    # 数据加载线程数（小数据集减少线程数）
     
-    # 优化器配置（使用YOLO官方推荐配置）
+    # 优化器配置（小数据集优化）
     'optimizer': 'auto',             # 优化器：auto=SGD（官方推荐）
-    'lr0': 0.01,                     # 初始学习率
-    'lrf': 0.01,                     # 最终学习率 (lr0 * lrf)
+    'lr0': 0.001,                    # 初始学习率（小数据集降低学习率，防止过拟合）
+    'lrf': 0.1,                      # 最终学习率 (lr0 * lrf = 0.0001)
     'momentum': 0.937,               # SGD动量
-    'weight_decay': 0.0005,          # 权重衰减
+    'weight_decay': 0.001,           # 权重衰减（增加以防止过拟合）
     
-    # 训练策略
-    'patience': 20,                  # 早停等待轮数（减少等待时间）
+    # 训练策略（小数据集优化）
+    'patience': 100,                 # 早停等待轮数（小数据集需要更多耐心）
+    # 'patience': 0,                 # 设置为0可禁用早停，训练完所有epoch
     'save_period': 10,               # 每N轮保存一次模型
-    'cos_lr': False,                 # 使用线性学习率调度（更稳定）
-    'warmup_epochs': 3,              # 预热轮数
+    'cos_lr': True,                  # 使用余弦学习率调度（更适合小数据集）
+    'warmup_epochs': 5,              # 预热轮数（小数据集增加预热）
     'warmup_momentum': 0.8,          # 预热初始动量
     'warmup_bias_lr': 0.1,           # 预热偏置学习率
     
-    # 数据增强
-    'hsv_h': 0.015,                  # HSV-色调增强
+    # 数据增强（小数据集加强数据增强）
+    'hsv_h': 0.02,                   # HSV-色调增强（增强）
     'hsv_s': 0.7,                    # HSV-饱和度增强
     'hsv_v': 0.4,                    # HSV-亮度增强
-    'degrees': 0.0,                  # 旋转角度 (+/- deg)
-    'translate': 0.1,                # 平移 (+/- fraction)
-    'scale': 0.5,                    # 缩放增益
-    'shear': 0.0,                    # 剪切角度 (+/- deg)
-    'perspective': 0.0,              # 透视变换
-    'flipud': 0.0,                   # 上下翻转概率
+    'degrees': 10.0,                 # 旋转角度 (+/- deg)（小数据集启用旋转）
+    'translate': 0.2,                # 平移 (+/- fraction)（增强）
+    'scale': 0.9,                    # 缩放增益（增强范围）
+    'shear': 5.0,                    # 剪切角度 (+/- deg)（小数据集启用剪切）
+    'perspective': 0.0001,           # 透视变换（轻微透视）
+    'flipud': 0.0,                   # 上下翻转概率（聊天界面不适合上下翻转）
     'fliplr': 0.5,                   # 左右翻转概率
-    'mosaic': 1.0,                   # Mosaic增强概率
-    'mixup': 0.0,                    # Mixup增强概率
-    'copy_paste': 0.0,               # Copy-paste增强概率
+    'mosaic': 1.0,                   # Mosaic增强概率（保持）
+    'mixup': 0.1,                    # Mixup增强概率（小数据集启用mixup）
+    'copy_paste': 0.1,               # Copy-paste增强概率（小数据集启用copy-paste）
     
     # 验证和保存
     'val': True,                     # 训练过程中验证
@@ -60,7 +62,7 @@ CONFIG = {
     
     # 输出配置
     'project': 'runs/train',         # 项目目录
-    'name': 'yolov8s_bubble',        # 实验名称
+    'name': None,                    # 实验名称（将在运行时自动生成）
     'exist_ok': True,                # 覆盖已存在的实验
 }
 
@@ -130,6 +132,13 @@ def train_model(config):
     print("开始训练 YOLO8s")
     print("=" * 60)
     
+    # 自动生成实验名称（如果未指定）
+    if config['name'] is None:
+        current_date = datetime.now().strftime('%y%m%d')
+        base_name = 'yolov8s_bubble'
+        config['name'] = f"{base_name}_{current_date}"
+        print(f"\n✅ 自动生成实验名称: {config['name']}")
+    
     # 打印配置
     print("\n训练配置:")
     print(f"  模型: {config['model']}")
@@ -141,6 +150,7 @@ def train_model(config):
     print(f"  初始学习率: {config['lr0']}")
     print(f"  余弦学习率: {config['cos_lr']}")
     print(f"  早停patience: {config['patience']}")
+    print(f"  实验名称: {config['name']}")
     
     # 加载模型
     print(f"\n正在加载模型: {config['model']}")
@@ -212,6 +222,7 @@ def train_model(config):
         seed=42,
         deterministic=True,
         amp=True,                    # 自动混合精度训练
+        close_mosaic=10,             # 最后N个epoch关闭mosaic（提高稳定性）
     )
     
     print("\n" + "=" * 60)
