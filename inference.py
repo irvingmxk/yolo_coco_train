@@ -8,12 +8,37 @@ YOLO Inference Script
 from pathlib import Path
 from ultralytics import YOLO
 import cv2
+import sys
+import os
 
-def predict_image(model_path, image_path, save_dir='runs/predict'):
+# 导入配置参数（从yolo_cueq模块）
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'yolo_cueq'))
+try:
+    from config import CONFIG
+except ImportError:
+    # 如果导入失败，使用默认值
+    CONFIG = {
+        'yolo_conf': 0.5,
+        'yolo_iou': 0.45,
+    }
+    print("⚠️  无法导入config.py，使用默认配置参数")
+
+def predict_image(model_path, image_path, save_dir='runs/predict', conf=None, iou=None):
     """
     对单张图片进行预测
+    
+    Args:
+        model_path: 模型路径
+        image_path: 图片路径
+        save_dir: 保存目录
+        conf: 置信度阈值（默认使用config中的值）
+        iou: IOU阈值（默认使用config中的值）
     """
     model = YOLO(model_path)
+    
+    # 使用config中的默认值，或传入的参数
+    conf_threshold = conf if conf is not None else CONFIG['yolo_conf']
+    iou_threshold = iou if iou is not None else CONFIG['yolo_iou']
     
     results = model.predict(
         source=image_path,
@@ -23,8 +48,8 @@ def predict_image(model_path, image_path, save_dir='runs/predict'):
         project=save_dir,
         name='results',
         exist_ok=True,
-        conf=0.25,
-        iou=0.7,
+        conf=conf_threshold,      # 使用config中的值：0.5
+        iou=iou_threshold,        # 使用config中的值：0.45
         max_det=300,
         show_labels=True,
         show_conf=True,
@@ -33,11 +58,22 @@ def predict_image(model_path, image_path, save_dir='runs/predict'):
     
     return results
 
-def predict_folder(model_path, folder_path, save_dir='runs/predict'):
+def predict_folder(model_path, folder_path, save_dir='runs/predict', conf=None, iou=None):
     """
     对文件夹中的所有图片进行预测
+    
+    Args:
+        model_path: 模型路径
+        folder_path: 文件夹路径
+        save_dir: 保存目录
+        conf: 置信度阈值（默认使用config中的值）
+        iou: IOU阈值（默认使用config中的值）
     """
     model = YOLO(model_path)
+    
+    # 使用config中的默认值，或传入的参数
+    conf_threshold = conf if conf is not None else CONFIG['yolo_conf']
+    iou_threshold = iou if iou is not None else CONFIG['yolo_iou']
     
     results = model.predict(
         source=folder_path,
@@ -47,8 +83,8 @@ def predict_folder(model_path, folder_path, save_dir='runs/predict'):
         project=save_dir,
         name='results',
         exist_ok=True,
-        conf=0.25,
-        iou=0.7,
+        conf=conf_threshold,      # 使用config中的值：0.5
+        iou=iou_threshold,        # 使用config中的值：0.45
         max_det=300,
         show_labels=True,
         show_conf=True,
@@ -63,14 +99,8 @@ def main():
     """
     # 模型路径（按优先级尝试）
     model_paths = [
-        "runs/train/yolov8s_bubble_251105/weights/best.pt" 
-        # "/workspace/yolo/runs/train/yolov8s_bubble_251105/weights/best.pt"
-        # "/workspace/yolo/runs/train/bubble_optimized/weights/best.pt"
-        # "runs/train/bubble_detection/weights/best.pt"
-        # "runs/train/yolov8s_bubble/weights/best.pt",
-        # 'runs/train/yolo11n_bubble/weights/best.pt',  # YOLO11n训练的模型
-        # "runs/train/yolo11s_bubble/weights/best.pt",
-        # "runs/train/yolo11m_bubble/weights/best.pt",
+        # "runs/train/yolo11m_bubble_251105/weights/best.pt"
+        "/workspace/yolo/runs/train/yolo11s_bubble/weights/best.pt"
     ]
     
     model_path = None
@@ -95,7 +125,11 @@ def main():
         print(f"❌ 错误: 测试图片路径不存在: {test_image}")
         return
     
-    print(f"使用模型: {model_path}\n")
+    print(f"使用模型: {model_path}")
+    print(f"检测参数 (来自config.py):")
+    print(f"  置信度阈值 (conf): {CONFIG['yolo_conf']}")
+    print(f"  IOU阈值 (iou): {CONFIG['yolo_iou']}")
+    print()
     
     if Path(test_image).is_dir():
         print(f"对文件夹进行预测: {test_image}")

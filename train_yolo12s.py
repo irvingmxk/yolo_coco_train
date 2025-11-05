@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-YOLO11m 气泡检测微调脚本（小数据集优化版）
-使用 YOLO11m 模型进行气泡检测的迁移学习训练
-针对小数据集（166张图片）进行了参数优化
+YOLO12s 气泡检测微调脚本
+使用 YOLO12s 模型进行气泡检测的迁移学习训练
 """
 
 import os
@@ -15,45 +14,44 @@ import torch
 # ============= 训练配置参数 =============
 CONFIG = {
     # 模型配置
-    'model': 'yolo11m.pt',          # YOLO11m 预训练模型（中等模型）
+    'model': 'yolo12s.pt',          # YOLO12s 预训练模型
     
     # 训练参数
-    'epochs': 200,                   # 训练轮数（小数据集需要更多轮数）
-    'batch': 4,                      # 批次大小（大模型减小批次，防止OOM）
+    'epochs': 100,                   # 训练轮数
+    'batch': 16,                     # 批次大小（11s模型适中，可用16）
     'imgsz': 640,                    # 输入图像大小
     'device': 0,                     # GPU设备（0,1,2... 或 'cpu'）
-    'workers': 4,                    # 数据加载线程数（小数据集减少线程数）
+    'workers': 8,                    # 数据加载线程数
     
-    # 优化器配置（小数据集+大模型，更强的正则化）
+    # 优化器配置（使用YOLO官方推荐配置）
     'optimizer': 'auto',             # 优化器：auto=SGD（官方推荐）
-    'lr0': 0.0005,                   # 初始学习率（大模型+小数据集，更小的学习率）
-    'lrf': 0.1,                      # 最终学习率 (lr0 * lrf = 0.00005)
+    'lr0': 0.01,                     # 初始学习率
+    'lrf': 0.01,                     # 最终学习率 (lr0 * lrf)
     'momentum': 0.937,               # SGD动量
-    'weight_decay': 0.0015,          # 权重衰减（更强的正则化，防止过拟合）
+    'weight_decay': 0.0005,          # 权重衰减
     
-    # 训练策略（小数据集+大模型优化）
-    'patience': 100,                 # 早停等待轮数（小数据集需要更多耐心）
-    # 'patience': 0,                 # 设置为0可禁用早停，训练完所有epoch
+    # 训练策略
+    'patience': 20,                  # 早停等待轮数（减少等待时间）
     'save_period': 10,               # 每N轮保存一次模型
-    'cos_lr': True,                  # 使用余弦学习率调度（更适合小数据集）
-    'warmup_epochs': 5,              # 预热轮数（小数据集增加预热）
+    'cos_lr': False,                 # 使用线性学习率调度（更稳定）
+    'warmup_epochs': 3,              # 预热轮数
     'warmup_momentum': 0.8,          # 预热初始动量
     'warmup_bias_lr': 0.1,           # 预热偏置学习率
     
-    # 数据增强（小数据集加强数据增强，防止过拟合）
-    'hsv_h': 0.02,                   # HSV-色调增强（增强）
+    # 数据增强
+    'hsv_h': 0.015,                  # HSV-色调增强
     'hsv_s': 0.7,                    # HSV-饱和度增强
     'hsv_v': 0.4,                    # HSV-亮度增强
-    'degrees': 10.0,                 # 旋转角度 (+/- deg)（小数据集启用旋转）
-    'translate': 0.2,                # 平移 (+/- fraction)（增强）
-    'scale': 0.9,                    # 缩放增益（增强范围）
-    'shear': 5.0,                    # 剪切角度 (+/- deg)（小数据集启用剪切）
-    'perspective': 0.0001,           # 透视变换（轻微透视）
-    'flipud': 0.0,                   # 上下翻转概率（聊天界面不适合上下翻转）
+    'degrees': 0.0,                  # 旋转角度 (+/- deg)
+    'translate': 0.1,                # 平移 (+/- fraction)
+    'scale': 0.5,                    # 缩放增益
+    'shear': 0.0,                    # 剪切角度 (+/- deg)
+    'perspective': 0.0,              # 透视变换
+    'flipud': 0.0,                   # 上下翻转概率
     'fliplr': 0.5,                   # 左右翻转概率
-    'mosaic': 1.0,                   # Mosaic增强概率（保持）
-    'mixup': 0.15,                   # Mixup增强概率（大模型+小数据集，增强mixup）
-    'copy_paste': 0.15,              # Copy-paste增强概率（大模型+小数据集，增强copy-paste）
+    'mosaic': 1.0,                   # Mosaic增强概率
+    'mixup': 0.0,                    # Mixup增强概率
+    'copy_paste': 0.0,               # Copy-paste增强概率
     
     # 验证和保存
     'val': True,                     # 训练过程中验证
@@ -127,37 +125,31 @@ def check_environment():
 
 def train_model(config):
     """
-    训练YOLO11m模型
+    训练YOLO12s模型
     """
     print("\n" + "=" * 60)
-    print("开始训练 YOLO11m (小数据集优化版)")
+    print("开始训练 YOLO12s")
     print("=" * 60)
     
     # 自动生成实验名称（如果未指定）
     if config['name'] is None:
         current_date = datetime.now().strftime('%y%m%d')
-        base_name = 'yolo11m_bubble'
+        base_name = 'yolo12s_bubble'
         config['name'] = f"{base_name}_{current_date}"
         print(f"\n✅ 自动生成实验名称: {config['name']}")
     
     # 打印配置
     print("\n训练配置:")
-    print(f"  模型: {config['model']} (20.1M参数，中等模型)")
+    print(f"  模型: {config['model']}")
     print(f"  训练轮数: {config['epochs']}")
-    print(f"  批次大小: {config['batch']} (大模型减小批次)")
+    print(f"  批次大小: {config['batch']}")
     print(f"  图像大小: {config['imgsz']}")
     print(f"  设备: {config['device']}")
     print(f"  优化器: {config['optimizer']}")
-    print(f"  初始学习率: {config['lr0']} (大模型+小数据集，更小学习率)")
+    print(f"  初始学习率: {config['lr0']}")
     print(f"  余弦学习率: {config['cos_lr']}")
-    print(f"  权重衰减: {config['weight_decay']} (更强的正则化)")
     print(f"  早停patience: {config['patience']}")
     print(f"  实验名称: {config['name']}")
-    
-    print("\n⚠️  注意事项:")
-    print("  - 大模型+小数据集容易过拟合，已加强正则化")
-    print("  - 如果验证集指标远低于训练集，说明过拟合")
-    print("  - 建议对比 yolo11s 和 yolo11m 的验证集表现")
     
     # 加载模型
     print(f"\n正在加载模型: {config['model']}")
@@ -229,7 +221,6 @@ def train_model(config):
         seed=42,
         deterministic=True,
         amp=True,                    # 自动混合精度训练
-        close_mosaic=10,             # 最后N个epoch关闭mosaic（提高稳定性）
     )
     
     print("\n" + "=" * 60)
@@ -273,7 +264,7 @@ def main():
     """
     print("\n")
     print("╔" + "=" * 58 + "╗")
-    print("║" + " " * 10 + "YOLO11m 气泡检测训练（小数据集优化）" + " " * 10 + "║")
+    print("║" + " " * 15 + "YOLO12s 气泡检测训练" + " " * 15 + "║")
     print("╚" + "=" * 58 + "╝")
     print()
     
@@ -303,11 +294,6 @@ def main():
         print(f"  混淆矩阵: {best_model_path.parent.parent}/confusion_matrix.png")
         print("=" * 60)
         
-        print(f"\n💡 建议:")
-        print(f"  对比 yolo11s 和 yolo11m 的验证集指标")
-        print(f"  如果 yolo11m 验证集指标明显低于训练集，说明过拟合")
-        print(f"  如果 yolo11m 验证集指标更好，说明大模型有优势")
-        
         print(f"\n🚀 使用训练好的模型进行推理:")
         print(f"  python inference.py")
         print()
@@ -317,3 +303,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
