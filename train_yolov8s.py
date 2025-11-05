@@ -93,7 +93,7 @@ def check_environment():
         print(f"   首次运行将自动下载预训练模型")
     
     # 检查数据集
-    data_dir = Path('/workspace/yolo/data_1029')
+    data_dir = Path('/workspace/yolo/data_1105')
     train_dir = data_dir / 'train' / 'images'
     val_dir = data_dir / 'val' / 'images'
     data_yaml = data_dir / 'data.yaml'
@@ -147,7 +147,7 @@ def train_model(config):
     model = YOLO(config['model'])
     
     # 数据配置文件路径
-    data_yaml = '/workspace/yolo/data_1029/data.yaml'
+    data_yaml = '/workspace/yolo/data_1105/data.yaml'
     
     print(f"\n开始训练...")
     print(f"数据配置: {data_yaml}")
@@ -274,7 +274,7 @@ def main():
     # 验证最佳模型
     if best_model_path.exists():
         print(f"\n📊 验证最佳模型...")
-        validate_model(str(best_model_path), '/workspace/yolo/data_1029/data.yaml')
+        validate_model(str(best_model_path), '/workspace/yolo/data_1105/data.yaml')
         
         print(f"\n" + "=" * 60)
         print("训练结果文件:")

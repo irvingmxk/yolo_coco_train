@@ -20,7 +20,7 @@ def split_dataset(data_dir, val_split=0.2, seed=42):
     labels_dir = data_dir / 'labels'
     
     print("=" * 60)
-    print("准备数据集: data_1029")
+    print("准备数据集: data_1105")
     print("=" * 60)
     
     # 获取所有图片文件
@@ -151,12 +151,12 @@ def main():
     """
     print("\n")
     print("╔" + "=" * 58 + "╗")
-    print("║" + " " * 15 + "准备 data_1029 数据集" + " " * 15 + "║")
+    print("║" + " " * 15 + "准备 data_1105 数据集" + " " * 15 + "║")
     print("╚" + "=" * 58 + "╝")
     print()
     
     # 数据目录
-    data_dir = Path('/workspace/yolo/data_1029')
+    data_dir = Path('/workspace/yolo/data_1105')
     
     if not data_dir.exists():
         print(f"❌ 数据目录不存在: {data_dir}")
