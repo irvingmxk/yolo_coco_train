@@ -99,8 +99,8 @@ def main():
     """
     # 模型路径（按优先级尝试）
     model_paths = [
-        # "runs/train/yolo11m_bubble_251105/weights/best.pt"
-        "/workspace/yolo/runs/train/yolo11s_bubble/weights/best.pt"
+        "/workspace/yolo/runs/train/yolo11s_bubble_251105/weights/best.pt"
+        # "/workspace/yolo/runs/train/yolo11s_bubble/weights/best.pt"
     ]
     
     model_path = None
